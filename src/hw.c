@@ -32,7 +32,7 @@ void init_hw_slow (void)
     ANCON1 = 0x1B;
     TRISA = 0x01;
     TRISC = 0xFC;
-    TRISB = 0xF3;
+    TRISB = 0x33;
     T4CON = 0x27;
     TMR4 = 0;
     PR4 = 249;
@@ -193,7 +193,11 @@ void lcdc (unsigned char data)
 	DISP_EN=1;
 	lcd_ll_set_dl(data&0x0F);
 	DISP_EN=0;
-	__delay_ms(1);
+	if (data==0x01)
+		__delay_ms(4);
+	else
+		__delay_ms(1);
+
 }
 
 
@@ -204,6 +208,7 @@ void lcdt (unsigned char data)
         if (data=='!') data  = 1;
         if (data=='@') data  = 2;
         if (data=='#') data  = 3;
+        if (data=='$') data  = 0xDF;
 	datat=data;
 	DISP_RS=1;
 	DISP_EN=1;
@@ -214,10 +219,7 @@ void lcdt (unsigned char data)
 	DISP_EN=1;
 	lcd_ll_set_dl(data&0x0F);
 	DISP_EN=0;
-	if (data==0x01)
-		__delay_ms(4);
-	else
-		__delay_ms(1);
+        __delay_ms(1);
 }
 
 void refresh_disp(unsigned char * data)
@@ -384,10 +386,11 @@ ret = (unsigned int)(adc);
 return ret;
 }
 
+
 unsigned char get_batt_level (unsigned int voltage)
 {
 unsigned char ret;
-if (voltage<3500)
+if (voltage<3550)
     ret = 0;
 else if (voltage<3700)
     ret = 1;

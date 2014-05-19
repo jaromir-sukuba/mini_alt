@@ -39,6 +39,7 @@
 #include "main_tasks.h"
 
 #include "HardwareProfile.h"
+#include "hw.h"
 
 /** V A R I A B L E S ********************************************************/
 #if defined(__18CXX)
@@ -47,7 +48,11 @@
 
 char USB_In_Buffer[64];
 char USB_Out_Buffer[64];
-
+unsigned char usb_state;
+extern unsigned char memory_bank;
+unsigned int memory_ptr;
+extern volatile key_var keys;
+unsigned char ds;
 /** P R I V A T E  P R O T O T Y P E S ***************************************/
 static void InitializeSystem(void);
 void ProcessIO(void);
@@ -114,6 +119,7 @@ void UserInit(void);
 	#pragma interrupt YourHighPriorityISRCode
 	void YourHighPriorityISRCode()
 	{
+
         #if defined(USB_INTERRUPT)
 	        USBDeviceTasks();
         #endif
@@ -122,7 +128,7 @@ void UserInit(void);
 	#pragma interruptlow YourLowPriorityISRCode
 	void YourLowPriorityISRCode()
 	{
-	} 
+        }
 
 #endif
 
@@ -138,21 +144,55 @@ void main(void)
 	{   
     InitializeSystem();
     main_init();
+    usb_state=0;
 //      OSCCON = 0x03;
 //	DSCONH = 0x80;
 //	Sleep();
     main_usb_state =0;
     OSCCON = 0x63;
+
+
+//    				OSCCON = 0x40;  //40
+//				pll_startup_counter = 6000;
+//				OSCTUNEbits.PLLEN = 1;
+//				while(pll_startup_counter--);
+//				USBDeviceInit();
+//				USBDeviceAttach();
+//    while(1)
+//    {
+//    ProcessIO();
+//    }
+main_nonusb_state = STATE_PRESS;
+
     while(1)
 	    {
 		if (main_usb_state==0)
 			{
 //			OSCTUNE = 0x80;
 			main_nonusb_state = main_loop_nonusb(main_nonusb_state);
+                        if (main_nonusb_state== STATE_SHDN)
+                            {
+                            while (1)
+                                {
+                                LATB = 0;
+                                LATC = 0;
+                                LATA = 0;
+                                LATBbits.LATB2 = 1;
+                                INTCON = 0x10;
+                                OSCCON = 0x03;
+//                                DSCONH = 0x80;
+                                Sleep();
+                                LATB = 0;
+                                LATC = 0;
+                                LATA = 0;
+                                if (K1==0)
+                                    Reset();
+                                }
+                            }
 			if(USB_BUS_SENSE)
 				{
 				OSCCON = 0x40;  //40
-				pll_startup_counter = 600;
+				pll_startup_counter = 6000;
 				OSCTUNEbits.PLLEN = 1;
 				while(pll_startup_counter--);
 				USBDeviceInit();
@@ -180,6 +220,9 @@ void main(void)
 	}
 
 
+
+
+
 static void InitializeSystem(void)
 {
     tris_usb_bus_sense = INPUT_PIN; // See HardwareProfile.h
@@ -187,37 +230,44 @@ static void InitializeSystem(void)
 
 void ProcessIO(void)
 {   
-    BYTE numBytesRead;
-
+    unsigned int datar;
+    unsigned char len;
     // User Application USB tasks
+    ds = USBDeviceState;
     if((USBDeviceState < CONFIGURED_STATE)||(USBSuspendControl==1)) return;
-
+    LED = ~ LED;
+    if (usb_state==0)
+        {
+        memory_ptr=0;
+        if (keys.k2)
+            {
+            keys.k2=0;
+            usb_state=1;
+            }
+        }
+    if (usb_state==1)
+        {
+        if(mUSBUSARTIsTxTrfReady())
+            {
+            datar = read_mem_location(memory_ptr,memory_bank);
+            memory_ptr++;
+            if (datar==0xFFFF)
+                {
+                sprintf(USB_In_Buffer,"---end of bank %d---\r\n",memory_bank);
+                putUSBUSART(USB_In_Buffer,strlen(USB_In_Buffer));
+                usb_state=0;
+                }
+            else
+                {
+                sprintf(USB_In_Buffer,"%d,%d\r\n",memory_ptr,datar);
+                putUSBUSART(USB_In_Buffer,strlen(USB_In_Buffer));
+                }
+            }
+        }
     if(USBUSARTIsTxTrfReady())
-    {
-		numBytesRead = getsUSBUSART(USB_Out_Buffer,64);
-		if(numBytesRead != 0)
-		{
-			BYTE i;
-	        
-			for(i=0;i<numBytesRead;i++)
-			{
-				switch(USB_Out_Buffer[i])
-				{
-					case 0x0A:
-					case 0x0D:
-						USB_In_Buffer[i] = USB_Out_Buffer[i];
-						break;
-					default:
-						USB_In_Buffer[i] = USB_Out_Buffer[i] + 1;
-						break;
-				}
-
-			}
-
-			putUSBUSART(USB_In_Buffer,numBytesRead);
-		}
-	}
-
+        {
+        getsUSBUSART(USB_Out_Buffer,64);
+        }
     CDCTxService();
 }		//end ProcessIO
 

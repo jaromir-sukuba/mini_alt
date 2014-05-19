@@ -1,15 +1,29 @@
 unsigned char main_loop_nonusb (unsigned char state);
-void main_init (void);
 void timer_task(void);
+void lcd_ll_set_dl (unsigned char data);
+void initLCD(void);
+void lcdc (unsigned char data);
+void lcdt (unsigned char data);
+void set_battery_char (unsigned char level);
+void clear_disp_buffer (void);
+
+
+void __delay_ms(unsigned int val);
+void refresh_disp(unsigned char * data);
 unsigned int get_timer(void);
+void iic_init (void);
+void iic_start (void);
+void iic_restart (void);
+void iic_stop (void);
+void iic_write (unsigned char data);
+unsigned char iic_read (unsigned char ack);
+unsigned char iic_read_reg (unsigned char hw_addr, unsigned char addr);
+void iic_write_reg (unsigned char hw_addr, unsigned char addr, unsigned char data);
 float calc_alt (unsigned long pres, unsigned long rpres);
 unsigned long get_avg_pres (unsigned long pres);
 float get_alt (unsigned char * state);
 unsigned char get_vars (unsigned char * state, float * altitude, unsigned long * pressure, char * temperature, unsigned long rpres);
 unsigned long calc_pres (int alt, unsigned long pres);
-unsigned char main_loop_usb(unsigned char state);
-void main_loop_usb_init (void);
-
 
 typedef union
 {
@@ -33,45 +47,17 @@ unsigned char CHAR;
 #define STATE_TEMP  3
 #define STATE_OFF   4
 #define STATE_MEM   5
-#define STATE_RPRES 6
-#define STATE_SHDN  7
+#define STATE_RPRES   6
 
-#define SSTATE_SET_RPRES_NONE   0
-#define SSTATE_SET_RPRES_ASK    3
+#define SSTATE_SET_RPRES_NONE    3
+#define SSTATE_SET_RPRES_ASK    0
 #define SSTATE_SET_RPRES_DIR    1
 #define SSTATE_SET_RPRES_ALT    2
-
-#define SSTATE_SET_MEM_NONE     0
-#define SSTATE_SET_MEM_BANK     1
-#define SSTATE_SET_MEM_START    2
-#define SSTATE_SET_MEM_FIN      3
-#define SSTATE_SET_MEM_ASK      4
 
 
 #define MEAS_STATE_START    0
 #define MEAS_STATE_WAIT     1
 #define MEAS_STATE_DONE     MEAS_STATE_START
-
-#define	LED	LATBbits.LATB3
-
-#define	DISP_DB4	LATAbits.LATA1
-#define	DISP_DB5	LATAbits.LATA2
-#define	DISP_DB6	LATAbits.LATA3
-#define	DISP_DB7	LATAbits.LATA5
-#define	DISP_EN		LATCbits.LATC0
-#define	DISP_RS		LATCbits.LATC1
-
-
-
-#define K1      PORTCbits.RC7
-#define K2      PORTCbits.RC2
-#define K3      PORTBbits.RB0
-
-#define PRES_ARR_SIZE   15
-
-#define ADC_CHNL_BMON   0
-#define ADC_CHNL_CHMON  10
-
 
 /*
 RA1,2,3,5 - D4..7

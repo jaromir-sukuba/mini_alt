@@ -5,15 +5,23 @@
 #include "main_tasks.h"
 #include "hw.h"
 
+/*
+ * odpojena bateria - 780
+ * nabija sa - 505
+ *
+
+ */
 
 unsigned char tbuff[20];
 unsigned char lcd_buff[25];
 unsigned long pres_arr[PRES_ARR_SIZE];
 unsigned long pres_arr_t[PRES_ARR_SIZE];
 unsigned char pres_arr_pointer;
-unsigned int timer_main, time,timer_log,timer_usb;
+volatile unsigned int timer_main;
+unsigned int time,timer_log,timer_usb;
+unsigned int log_interval;
 
-unsigned char main_state, main_substate, meas_state, ndata,batt_level, memory_bank, logging;
+unsigned char main_substate, meas_state, ndata,batt_level, memory_bank, logging;
 unsigned long pres,rpres;
 float alt,alt_temp;
 unsigned int alti,alti_r,memory_pointer,batt_volt;
@@ -21,35 +29,66 @@ int ralt;
 char temper;
 
 volatile key_var keys, keys_old, keys_new;
+unsigned char mread;
+unsigned int addr,dat;
 
+extern unsigned char ds;
 
 void main_init (void)
 {
 init_hw_slow();
 initLCD();
-main_state  = STATE_PRESS;
-pres = 101300;
+rpres = 101300;
 batt_level = 3;
 ralt = 250;
 logging = 0;
 memory_pointer = 0;
 pres = 0;
+log_interval = 1000;
 time = get_timer();
-timer_log = time;
+timer_log = time + log_interval;
 memory_bank = 0;
+keys.CHAR = 0;
 }
 
-unsigned char main_loop_nonusb (unsigned char state)
+unsigned char main_loop_nonusb (unsigned char main_state)
 {
+    LED =0;
     refresh_disp(lcd_buff);
     __delay_ms(50);
     time = get_timer();
     batt_volt = get_batt_volts();
+    if (batt_volt<3400)
+        {
+        if(logging!=0)
+            write_mem_location(0xFFFF,memory_pointer,memory_bank);
+        return STATE_SHDN;
+        }
     batt_level = get_batt_level(batt_volt);
     set_battery_char(batt_level);
     ndata = get_vars(&meas_state,&alt,&pres,&temper,rpres);
-    if (ndata!=0) LED = ~ LED;
-
+    alti = alt;
+    alti_r = ((alt-((float)(alti)))*10);
+    //    if (ndata!=0) LED = ~ LED;
+    if (mread)
+        {
+        dat = read_mem_location(addr,memory_bank);
+        }
+    if ((time>timer_log)&((time-timer_log)<(4*log_interval)))
+        {
+        timer_log = time + log_interval;
+        if (logging!=0)
+            {
+            write_mem_location(alti,memory_pointer,memory_bank);
+            memory_pointer++;
+            if (memory_pointer==8190)
+                {
+                write_mem_location(0xFFFF,memory_pointer,memory_bank);
+                logging = 0;
+                }
+//            LED = ~ LED;
+            }
+        }
     if (main_state == STATE_START)
         {
         sprintf (lcd_buff,"START         ");
@@ -59,6 +98,12 @@ unsigned char main_loop_nonusb (unsigned char state)
         clear_disp_buffer();
         sprintf (lcd_buff,"PRESS  ~  ");
         sprintf (lcd_buff+8,"%ldPa",pres);
+        if (keys.k1)
+            {
+            keys.k1 = 0;
+            main_state = STATE_OFF;
+            keys.CHAR = 0;
+            }
         if (keys.k3)
             {
             keys.k3 = 0;
@@ -70,10 +115,14 @@ unsigned char main_loop_nonusb (unsigned char state)
         {
         clear_disp_buffer();
         sprintf (lcd_buff,"ALT    ~   ");
-        alti = alt;
-        alti_r = ((alt-((float)(alti)))*10);
         sprintf (lcd_buff+8,"%d,%1.1dm",alti,alti_r);
-        if (keys.k3)
+         if (keys.k1)
+            {
+            keys.k1 = 0;
+            main_state = STATE_PRESS;
+            keys.CHAR = 0;
+            }
+       if (keys.k3)
             {
             keys.k3 = 0;
             main_state = STATE_TEMP;
@@ -84,7 +133,13 @@ unsigned char main_loop_nonusb (unsigned char state)
         {
         clear_disp_buffer();
         sprintf (lcd_buff,"TEMP   ~   ");
-        sprintf (lcd_buff+8,"%d dC",temper);
+        sprintf (lcd_buff+8,"%d$C",temper);
+        if (keys.k1)
+            {
+            keys.k1 = 0;
+            main_state = STATE_ALT;
+            keys.CHAR = 0;
+            }
         if (keys.k3)
             {
             keys.k3 = 0;
@@ -98,8 +153,17 @@ unsigned char main_loop_nonusb (unsigned char state)
         if (main_substate==SSTATE_SET_RPRES_NONE)
             {
             clear_disp_buffer();
-            sprintf (lcd_buff,"RPRES @~  ");
+            if (logging!=0)
+                sprintf (lcd_buff,"RPRES @~  ");
+            else
+                sprintf (lcd_buff,"RPRES !~  ");
             sprintf (lcd_buff+8,"%ldhPa",rpres/100);
+            if (keys.k1)
+                {
+                keys.k1 = 0;
+                main_state = STATE_TEMP;
+                keys.CHAR = 0;
+                }
             if (keys.k3)
                 {
                 keys.k3 = 0;
@@ -110,7 +174,7 @@ unsigned char main_loop_nonusb (unsigned char state)
             if (keys.k2)
                 {
                 keys.k2=0;
-                main_substate  = SSTATE_SET_RPRES_ASK;
+                if (logging==0) main_substate  = SSTATE_SET_RPRES_ASK;
                 }
             }
         if (main_substate==SSTATE_SET_RPRES_ASK)
@@ -180,10 +244,20 @@ unsigned char main_loop_nonusb (unsigned char state)
         {
         if (main_substate==SSTATE_SET_MEM_NONE)
             {
+            unsigned long perc_temp;
             clear_disp_buffer();
             if (logging==0 ) sprintf (lcd_buff,"MEM   !~ ");
-            else sprintf (lcd_buff,"MEML  !~ ");
-            sprintf (lcd_buff+8,"%d/%d",memory_bank,memory_pointer);
+            else sprintf (lcd_buff,"LOG   !~ ");
+            perc_temp = memory_pointer;
+            perc_temp = perc_temp*100;
+            perc_temp = perc_temp / 8192;
+            sprintf (lcd_buff+8,"B%d; %ld%%",memory_bank,perc_temp);
+            if (keys.k1)
+                {
+                keys.k1 = 0;
+                main_state = STATE_RPRES;
+                keys.CHAR = 0;
+                }
             if (keys.k3)
                 {
                 keys.k3 = 0;
@@ -200,11 +274,14 @@ unsigned char main_loop_nonusb (unsigned char state)
             {
             clear_disp_buffer();
             sprintf (lcd_buff,"Select ~ ");
-            sprintf (lcd_buff+8,"BNK  LOG");
+            if (logging==0)
+                sprintf (lcd_buff+8,"BNK  LOG");
+            else
+                sprintf (lcd_buff+8,"     LOG");
             if (keys.k1)
                 {
                 keys.k1 = 0;
-                main_substate=SSTATE_SET_MEM_BANK;
+                if (logging==0) main_substate=SSTATE_SET_MEM_BANK;
                 keys.CHAR = 0;
                 }
             if (keys.k3)
@@ -256,9 +333,13 @@ unsigned char main_loop_nonusb (unsigned char state)
                 {
                 keys.k3 = 0;
                 main_substate=SSTATE_SET_MEM_NONE;
-                memory_pointer = 0;
                 if (logging==0) logging = 1;
-                else logging = 0;
+                else
+                    {
+                    logging = 0;
+                    write_mem_location(0xFFFF,memory_pointer,memory_bank);
+                    }
+                memory_pointer = 0;
                 }
             }
 
@@ -266,17 +347,31 @@ unsigned char main_loop_nonusb (unsigned char state)
     if (main_state == STATE_OFF)
         {
         clear_disp_buffer();
-        sprintf (lcd_buff,"OFF    ~  ");
+            if (logging!=0)
+                sprintf (lcd_buff,"OFF   @~  ");
+            else
+                sprintf (lcd_buff,"OFF   !~  ");
+        if (keys.k1)
+            {
+            keys.k1 = 0;
+            main_state = STATE_MEM;
+            keys.CHAR = 0;
+            }
         if (keys.k3)
             {
             keys.k3 = 0;
             main_state = STATE_PRESS;
             }
+        if (keys.k2)
+            {
+            keys.k2 = 0;
+            if (logging==0) main_state = STATE_SHDN;
+            }
         }
 
 
 
-return state;
+return main_state;
 }
 
 unsigned char get_vars (unsigned char * state, float * altitude, unsigned long * pressure, char * temperature, unsigned long rpres)
@@ -343,6 +438,7 @@ PIE3bits.TMR4IE=1;
 return temp;
 }
 
+
 unsigned long get_avg_pres (unsigned long pres)
 {
 unsigned char i,c,d;
@@ -398,25 +494,62 @@ alt = (-log(p/p0))*((286.0*(temper+273.15))/9.81);
 return alt;
 }
 
+unsigned int chmon_array[10];
+unsigned char chmon_array_pointer;
+
+
 void main_loop_usb_init (void)
 {
 timer_usb = get_timer();
 init_hw_fast ();
+memory_bank = 0;
+chmon_array_pointer = 0;
+batt_level = 0;
 }
+
+
 
 unsigned char main_loop_usb(unsigned char state)
 {
 unsigned int adc;
+unsigned char i;
+
 time = get_timer();
-if (time>=(timer_usb + 1000))
+if (time>=(timer_usb + 500))
     {
-    LED = ~ LED;
+//    LED = ~ LED;
     adc = get_adc(ADC_CHNL_CHMON);
+    chmon_array[chmon_array_pointer++] = adc;
+    if (chmon_array_pointer==10) chmon_array_pointer=0;
+    adc = 0;
+    for (i=0;i<10;i++) adc = adc + chmon_array[i];
+    adc = adc / 10;
+    if (adc<570)
+        {
+        batt_level++;
+        if (batt_level==5) batt_level = 0;
+        }
+    else
+        {
+        batt_level = 4;
+        }
+    set_battery_char(batt_level);
     timer_usb = time;
-    sprintf (lcd_buff,"USB MODE");
-    sprintf (lcd_buff+8,"%d  ",adc);
+    if (keys.k1)
+        {
+        keys.k1=0;
+        if (memory_bank>0) memory_bank--;
+        }
+    if (keys.k3)
+        {
+        keys.k3=0;
+        if (memory_bank<3) memory_bank++;
+        }
+    sprintf (lcd_buff,"USB    ~");
+    sprintf (lcd_buff+8,"Bank:%d  ",memory_bank);
     refresh_disp(lcd_buff);
     }
-return state;
+
+ return state;
 }
 
